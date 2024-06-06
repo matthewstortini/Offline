@@ -25,6 +25,7 @@
 #include "Offline/RecoDataProducts/inc/HelixSeed.hh"
 #include "Offline/RecoDataProducts/inc/StrawHitIndex.hh"
 #include "Offline/RecoDataProducts/inc/TimeCluster.hh"
+#include "Offline/RecoDataProducts/inc/TrkFitFlag.hh"
 
 #include "Offline/Mu2eUtilities/inc/LsqSums2.hh"
 #include "Offline/Mu2eUtilities/inc/LsqSums4.hh"
