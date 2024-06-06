@@ -25,7 +25,6 @@
 #include "Offline/RecoDataProducts/inc/HelixSeed.hh"
 #include "Offline/RecoDataProducts/inc/StrawHitIndex.hh"
 #include "Offline/RecoDataProducts/inc/TimeCluster.hh"
-#include "Offline/RecoDataProducts/inc/TrkFitFlag.hh"
 
 #include "Offline/Mu2eUtilities/inc/LsqSums2.hh"
 #include "Offline/Mu2eUtilities/inc/LsqSums4.hh"
@@ -87,6 +86,7 @@ namespace mu2e {
       fhicl::Atom<float>         maxSeedCircleResidual  {Name("maxSeedCircleResidual"), Comment("add hits to triplet circle"  )  };
       fhicl::Atom<int>           minSeedCircleHits      {Name("minSeedCircleHits"    ), Comment("min hits to continue search" )  };
       fhicl::Atom<float>         maxDphiDz              {Name("maxDphiDz"            ), Comment("used finding phi-z segment"  )  };
+      fhicl::Atom<float>         maxSeedLineGap         {Name("maxSeedLineGap"       ), Comment("used finding phi-z segment"  )  };
       fhicl::Atom<float>         maxZWindow             {Name("maxZWindow"           ), Comment("used finding phi-z segment"  )  };
       fhicl::Atom<int>           minLineSegmentHits     {Name("minLineSegmentHits"   ), Comment("used in findSeedPhiLines()"  )  };
       fhicl::Atom<float>         segMultiplier          {Name("segMultiplier"        ), Comment("used in findSeedPhiLines()"  )  };
@@ -229,6 +229,7 @@ namespace mu2e {
     float    _maxSeedCircleResidual;
     int      _minSeedCircleHits;
     float    _maxDphiDz;
+    float    _maxSeedLineGap;
     float    _maxZWindow;
     int      _minLineSegmentHits;
     float    _segMultiplier;
@@ -351,6 +352,7 @@ namespace mu2e {
     void         initSeedCircle            (LoopCondition& outcome);
     void         initHelixPhi              ();
     void         findSeedPhiLines          ();
+    float        underEstimateSlope        (float& phi1, float& phi1Err2, float& phi2, float& phi2Err2, float& dz);
     void         resolve2PiAmbiguities     ();
     void         refinePhiLine             (size_t lineIndex, bool& removals);
     void         initFinalSeed             ();
@@ -398,6 +400,7 @@ namespace mu2e {
     _maxSeedCircleResidual         (config().maxSeedCircleResidual()                 ),
     _minSeedCircleHits             (config().minSeedCircleHits()                     ),
     _maxDphiDz                     (config().maxDphiDz()                             ),
+    _maxSeedLineGap                (config().maxSeedLineGap()                        ),
     _maxZWindow                    (config().maxZWindow()                            ),
     _minLineSegmentHits            (config().minLineSegmentHits()                    ),
     _segMultiplier                 (config().segMultiplier()                         ),
@@ -1333,18 +1336,23 @@ namespace mu2e {
         if (std::abs(seedZ - testZ) > _maxZWindow) {
           break;
         }
+        float positiveDeltaZ = lastAddedPositiveZ - testZ;
+        float negativeDeltaZ = lastAddedNegativeZ - testZ;
+        if (positiveDeltaZ > _maxSeedLineGap && negativeDeltaZ > _maxSeedLineGap) {
+          break;
+        }
         float testPhi = _tcHits[j].helixPhi;
         float testError2 = _tcHits[j].helixPhiError2;
         float testWeight = 1.0 / (testError2);
         float positiveDiff = std::abs(lastAddedPositivePhi - testPhi);
         float positiveDiffError = std::sqrt(lastAddedPositivePhiError2 + testError2);
-        float positiveDeltaZ = lastAddedPositiveZ - testZ;
         float negativeDiff = std::abs(lastAddedNegativePhi - testPhi);
         float negativeDiffError = std::sqrt(lastAddedNegativePhiError2 + testError2);
-        float negativeDeltaZ = lastAddedNegativeZ - testZ;
-        if (lastAddedPositivePhi > testPhi || positiveDiff < positiveDiffError) {
-          if (std::abs(lastAddedPositivePhi - testPhi)/positiveDeltaZ >= _maxDphiDz) {
-            continue;
+        if ((lastAddedPositivePhi > testPhi || positiveDiff < positiveDiffError) && positiveDeltaZ <= _maxSeedLineGap) {
+          if (positiveDiff >= positiveDiffError && std::abs((lastAddedPositivePhi-testPhi)/positiveDeltaZ) > _maxDphiDz) {
+            if (underEstimateSlope(lastAddedPositivePhi,lastAddedPositivePhiError2,testPhi,testError2,positiveDeltaZ) > _maxDphiDz) {
+              continue;
+            }
           }
           _positiveLine.tcHitsIndices.push_back(j);
           _positiveLine.helixPhiCorrections.push_back(0);
@@ -1356,9 +1364,11 @@ namespace mu2e {
             maxHitGap = positiveDeltaZ;
           }
         }
-        if (testPhi > lastAddedNegativePhi || negativeDiff < negativeDiffError) {
-          if (std::abs(lastAddedNegativePhi - testPhi)/negativeDeltaZ >= _maxDphiDz) {
-            continue;
+        if ((testPhi > lastAddedNegativePhi || negativeDiff < negativeDiffError) && negativeDeltaZ <= _maxSeedLineGap) {
+          if (negativeDiff >= negativeDiffError && std::abs((lastAddedNegativePhi-testPhi)/positiveDeltaZ) > _maxDphiDz) {
+            if (underEstimateSlope(lastAddedNegativePhi,lastAddedNegativePhiError2,testPhi,testError2,negativeDeltaZ) > _maxDphiDz) {
+              continue;
+            }
           }
           _negativeLine.tcHitsIndices.push_back(j);
           _negativeLine.helixPhiCorrections.push_back(0);
@@ -1403,6 +1413,22 @@ namespace mu2e {
         }
       }
     }
+  }
+
+  //-----------------------------------------------------------------------------
+  // function to find seed phi lines
+  //-----------------------------------------------------------------------------
+  float AgnosticHelixFinder::underEstimateSlope(float& phi1, float& phi1Err2, float& phi2, float& phi2Err2, float& dz) {
+
+    float slope = 0.0;
+    float phi1Err = std::sqrt(phi1Err2);
+    float phi2Err = std::sqrt(phi2Err2);
+
+    if (phi2 > phi1) { slope = std::abs(((phi2-phi2Err)-(phi1+phi1Err))/(dz)); }
+    if (phi2 < phi1) { slope = std::abs(((phi2+phi2Err)-(phi1-phi1Err))/(dz)); }
+
+    return slope;
+
   }
 
   //-----------------------------------------------------------------------------

@@ -616,6 +616,7 @@ CalPatRec : { @table::CalPatRec
             maxSeedCircleResidual   : 2.0
             minSeedCircleHits       : 7
             maxDphiDz               : 0.008
+            maxSeedLineGap          : 250.0
             maxZWindow              : 700.0
             minLineSegmentHits      : 3
             segMultiplier           : 3.0
@@ -626,7 +627,7 @@ CalPatRec : { @table::CalPatRec
             maxCircleRecoverSigma   : 3.0
             maxLineRecoverSigma     : 3.0
             caloClusterSigma        : 30.0
-            minNHelixComboHits      : 8
+            minNHelixComboHits      : 10
             minNHelixStrawHits      : 12
             minHelixPerpMomentum    : 40.0
             maxHelixPerpMomentum    : 140.0
